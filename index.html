@@ -287,8 +287,8 @@
 
   <div id="webgl"></div>
 
-  <!-- HTML-in-Canvas 布局容器：真实 DOM 放在这里，由 polyfill 渲染到 WebGL 纹理 -->
-  <canvas id="htmlCanvas" layoutsubtree>
+  <!-- HTML 内容源：先放在屏幕外，等 WebGL canvas 创建后再移进去 -->
+  <div id="html-source" style="position:fixed;left:-9999px;top:-9999px;width:840px;height:560px;">
     <div id="ui-content">
       <div class="ui-header">
         <div class="dot red"></div>
@@ -320,7 +320,7 @@
         </div>
       </div>
     </div>
-  </canvas>
+  </div>
 
   <script type="importmap">
   {
@@ -360,6 +360,11 @@
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     document.getElementById('webgl').appendChild(renderer.domElement);
+
+    // 把 HTML 内容源移到 WebGL canvas 里，让 polyfill 的 overlay 与画布坐标对齐
+    const content = document.getElementById('ui-content');
+    renderer.domElement.setAttribute('layoutsubtree', '');
+    renderer.domElement.appendChild(content);
 
     // ---------- 灯光 ----------
     const ambient = new THREE.AmbientLight(0xffffff, 0.35);
@@ -518,12 +523,14 @@
     // ---------- HTML-in-Canvas：把真实 DOM 渲染为可交互纹理 ----------
     installHtmlInCanvasPolyfill();
 
-    const htmlCanvas = document.getElementById('htmlCanvas');
-    const content = document.getElementById('ui-content');
-
     const threeHtml = new ThreeHTMLRenderer();
-    threeHtml.connect(htmlCanvas, camera, renderer);
+    threeHtml.connect(renderer.domElement, camera, renderer);
     threeHtml.addObject(content, clothMesh);
+
+    // polyfill 会把 content 移到一个 host overlay 里
+    const htmlHost = content.parentElement;
+    // host 本身不需要接收事件，只让被 matrix3d 定位的 content 接收，避免挡住 controls
+    if (htmlHost) htmlHost.style.pointerEvents = 'none';
 
     // 固定摄像头
     camera.position.set(0, -0.2, 8.5);
@@ -550,6 +557,8 @@
 
     function setMouseMode(mode) {
       mouseMode = mode;
+      // 无影响模式：content 接收事件，HTML 可交互
+      // 推动/拖动模式：content 不接收事件，让事件落到 WebGL canvas
       content.style.pointerEvents = mode === 'none' ? 'auto' : 'none';
       document.querySelectorAll('#mode-buttons button').forEach((btn) => {
         btn.classList.toggle('active', btn.dataset.mode === mode);
@@ -561,26 +570,30 @@
     });
     setMouseMode('none');
 
-    renderer.domElement.addEventListener('pointerdown', (e) => {
+    // 在 window 捕获阶段监听，确保不会被 HTML overlay 挡住
+    window.addEventListener('pointerdown', (e) => {
       if (mouseMode === 'none') return;
+      if (e.target.closest && e.target.closest('#controls, #info')) return;
       updatePointer(e);
       const p = raycastCloth();
       if (p) {
         mouseDown = true;
         mouseTarget.copy(p);
+        // 防止触发按钮/输入框等
+        e.preventDefault();
       }
-    });
+    }, true);
 
-    renderer.domElement.addEventListener('pointermove', (e) => {
+    window.addEventListener('pointermove', (e) => {
       if (mouseMode === 'none' || !mouseDown) return;
       updatePointer(e);
       const p = raycastCloth();
       if (p) mouseTarget.copy(p);
-    });
+    }, true);
 
     window.addEventListener('pointerup', () => {
       mouseDown = false;
-    });
+    }, true);
 
     // ---------- 风控制 ----------
     const windInput = document.getElementById('wind');
@@ -622,12 +635,16 @@
           const dy = mouseTarget.y - p.y;
           const dz = mouseTarget.z - p.z;
           const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-          const radius = 1.1;
+          const radius = 1.2;
           if (dist < radius && dist > 0.001) {
-            const pull = (mouseMode === 'drag' ? 5.0 : 2.5) * (1 - dist / radius);
-            force.x += dx * pull;
-            force.y += dy * pull;
-            force.z += dz * pull;
+            const strength = (mouseMode === 'drag' ? 7.0 : 3.5) * (1 - dist / radius);
+            const k = Math.min(strength * dt, 1.0);
+            p.x += dx * k;
+            p.y += dy * k;
+            p.z += dz * k;
+            p.ox += dx * k * 0.5;
+            p.oy += dy * k * 0.5;
+            p.oz += dz * k * 0.5;
           }
         }
 
