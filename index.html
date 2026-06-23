@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>HTML on Physical Canvas - Wind Blown Cloth</title>
+  <title>HTML in Canvas - Interactive Cloth</title>
   <style>
     * {
       margin: 0;
@@ -38,7 +38,7 @@
       color: #fff;
     }
 
-    /* 风/控制面板 */
+    /* 风控制面板 */
     #controls {
       position: absolute;
       top: 16px;
@@ -81,6 +81,24 @@
       background: #1d4ed8;
     }
 
+    #mode-buttons {
+      display: flex;
+      gap: 6px;
+    }
+
+    #mode-buttons button {
+      flex: 1;
+      padding: 6px 2px;
+      font-size: 11px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    #mode-buttons button.active {
+      background: #2563eb;
+      border-color: #2563eb;
+    }
+
     #webgl {
       position: absolute;
       top: 0;
@@ -89,55 +107,32 @@
       height: 100%;
     }
 
-    #css3d {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-    }
-
-    /* 交互模式下的真实 DOM 覆盖层 */
-    #ui-overlay {
-      width: 840px;
-      height: 560px;
-      background:
-        repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(120, 110, 90, 0.03) 2px, rgba(120, 110, 90, 0.03) 4px),
-        repeating-linear-gradient(90deg, transparent, transparent 2px, rgba(120, 110, 90, 0.03) 2px, rgba(120, 110, 90, 0.03) 4px),
-        #f7f5f0;
-      color: #1f2937;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      border-radius: 10px;
-      box-shadow: inset 0 0 60px rgba(120, 110, 90, 0.08);
-      pointer-events: auto;
-      opacity: 0;
-      transition: opacity 0.25s ease;
-    }
-
-    #ui-overlay.visible {
-      opacity: 1;
-    }
-
-    /* 真实 HTML UI 源，被 html2canvas 捕获后贴到布料上 */
-    #ui-source {
+    /* HTML-in-Canvas：这个 canvas 是 HTML 内容的“布局容器”，本身不显示 */
+    #htmlCanvas {
       position: fixed;
       left: -9999px;
       top: -9999px;
       width: 840px;
       height: 560px;
+    }
+
+    /* 真实的 UI 内容 */
+    #ui-content {
+      width: 840px;
+      height: 560px;
       background:
         repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(120, 110, 90, 0.03) 2px, rgba(120, 110, 90, 0.03) 4px),
         repeating-linear-gradient(90deg, transparent, transparent 2px, rgba(120, 110, 90, 0.03) 2px, rgba(120, 110, 90, 0.03) 4px),
         #f7f5f0;
       color: #1f2937;
-      overflow: hidden;
+      overflow: auto;
       display: flex;
       flex-direction: column;
       border-radius: 10px;
       box-shadow: inset 0 0 60px rgba(120, 110, 90, 0.08);
+      /* 让滚动和选中更自然 */
+      -webkit-overflow-scrolling: touch;
+      user-select: text;
     }
 
     .ui-header {
@@ -149,6 +144,9 @@
       padding: 0 16px;
       gap: 8px;
       flex-shrink: 0;
+      position: sticky;
+      top: 0;
+      z-index: 2;
     }
 
     .dot {
@@ -166,7 +164,7 @@
       padding: 36px;
       display: flex;
       gap: 28px;
-      overflow: auto;
+      min-height: 0;
     }
 
     .ui-sidebar {
@@ -200,17 +198,18 @@
       background: rgba(210, 206, 196, 0.7);
     }
 
-    .ui-content {
+    .ui-main {
       flex: 1;
+      min-width: 0;
     }
 
-    .ui-content h1 {
+    .ui-main h1 {
       margin: 0 0 10px;
       font-size: 34px;
       color: #111827;
     }
 
-    .ui-content p {
+    .ui-main p {
       margin: 0 0 18px;
       line-height: 1.6;
       color: #4b5563;
@@ -254,75 +253,99 @@
     .ui-card button:hover {
       background: #1d4ed8;
     }
+
+    .long-text {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(120, 110, 90, 0.12);
+    }
+
+    .long-text p {
+      margin-bottom: 12px;
+    }
   </style>
 </head>
 
 <body>
   <div id="info">
-    <h1>HTML on Physical Canvas</h1>
-    <p>风会吹动画布并产生褶皱 · 右上角切换鼠标模式（无影响模式可交互）</p>
+    <h1>HTML in Canvas</h1>
+    <p>风会吹动画布 · 上面的 HTML 可以选中文字、滚动、点击按钮</p>
   </div>
 
   <div id="controls">
     <label for="wind">风力强度</label>
     <input id="wind" type="range" min="0" max="100" value="35" />
     <button id="gust">🌬️ 一阵强风</button>
-    <button id="mouseMode">🖱️ 鼠标：推动画布</button>
+
+    <label style="margin-top: 10px;">鼠标模式</label>
+    <div id="mode-buttons">
+      <button data-mode="none" class="active">无影响（可交互 HTML）</button>
+      <button data-mode="push">推动画布</button>
+      <button data-mode="drag">拖动画布</button>
+    </div>
   </div>
 
   <div id="webgl"></div>
-  <!-- CSS3D 层：交互模式下显示真实可交互 DOM -->
-  <div id="css3d"></div>
 
-  <!-- 这个 DOM 会被渲染成纹理，贴到可形变的布料网格上 -->
-  <div id="ui-source">
-    <div class="ui-header">
-      <div class="dot red"></div>
-      <div class="dot yellow"></div>
-      <div class="dot green"></div>
-    </div>
-    <div class="ui-body">
-      <div class="ui-sidebar">
-        <h3>Navigation</h3>
-        <button>Dashboard</button>
-        <button>Projects</button>
-        <button>Settings</button>
+  <!-- HTML-in-Canvas 布局容器：真实 DOM 放在这里，由 polyfill 渲染到 WebGL 纹理 -->
+  <canvas id="htmlCanvas" layoutsubtree>
+    <div id="ui-content">
+      <div class="ui-header">
+        <div class="dot red"></div>
+        <div class="dot yellow"></div>
+        <div class="dot green"></div>
       </div>
-      <div class="ui-content">
-        <h1>HTML on Cloth</h1>
-        <p>这是一块真实的“画布”：DOM 内容被捕获为纹理，贴到由 Verlet 物理驱动的布料网格上。风吹过时，顶点会位移，HTML 内容会跟着几何体一起褶皱、起伏。</p>
-        <div class="ui-card">
-          <h4>Interactive Form</h4>
-          <input type="text" placeholder="Type something here..." />
-          <button>Submit</button>
+      <div class="ui-body">
+        <div class="ui-sidebar">
+          <h3>Navigation</h3>
+          <button>Dashboard</button>
+          <button>Projects</button>
+          <button>Settings</button>
+        </div>
+        <div class="ui-main">
+          <h1>HTML on Cloth</h1>
+          <p>这块画布使用了 WICG HTML-in-Canvas 提案的 polyfill。真实的 DOM 内容被渲染成 WebGL 纹理，同时事件通过射线检测映射回 DOM，所以你可以选中这段文字、滚动下方内容、在输入框里打字、点击 Submit。</p>
+          <div class="ui-card">
+            <h4>Interactive Form</h4>
+            <input type="text" placeholder="Type something here..." />
+            <button>Submit</button>
+          </div>
+          <div class="long-text">
+            <p>滚动演示：这里是一段额外的内容，用来展示画布内的滚动行为。Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+            <p>Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.</p>
+            <p>Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>
+            <p>继续滚动到底部……</p>
+            <p>到底了 🎉</p>
+          </div>
         </div>
       </div>
     </div>
-  </div>
-
-  <script src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  </canvas>
 
   <script type="importmap">
   {
     "imports": {
-      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      "three": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/",
+      "three-html-render/polyfill": "https://cdn.jsdelivr.net/npm/three-html-render@0.1.2/dist/polyfill.mjs",
+      "three-html-render/renderer": "https://cdn.jsdelivr.net/npm/three-html-render@0.1.2/dist/renderer.js"
     }
   }
   </script>
 
   <script type="module">
     import * as THREE from 'three';
-    import {CSS3DRenderer, CSS3DObject} from 'three/addons/renderers/CSS3DRenderer.js';
+    import { installHtmlInCanvasPolyfill } from 'three-html-render/polyfill';
+    import { ThreeHTMLRenderer } from 'three-html-render/renderer';
 
     // ---------- 参数 ----------
     const CLOTH_WIDTH = 6.0;
     const CLOTH_HEIGHT = 4.0;
     const SEG_X = 60;
     const SEG_Y = 40;
-    const ITERATIONS = 5;       // 约束求解迭代次数
-    let windStrength = 0.35;    // 基础风力
-    let gust = 0;               // 阵风叠加
+    const ITERATIONS = 5;
+    let windStrength = 0.35;
+    let gust = 0;
 
     // ---------- 场景 ----------
     const scene = new THREE.Scene();
@@ -337,11 +360,6 @@
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     document.getElementById('webgl').appendChild(renderer.domElement);
-
-    // ---------- CSS3D 渲染器（用于交互模式的可交互 DOM） ----------
-    const cssRenderer = new CSS3DRenderer();
-    cssRenderer.setSize(window.innerWidth, window.innerHeight);
-    document.getElementById('css3d').appendChild(cssRenderer.domElement);
 
     // ---------- 灯光 ----------
     const ambient = new THREE.AmbientLight(0xffffff, 0.35);
@@ -393,7 +411,6 @@
       ctx.fillStyle = '#e8e4dc';
       ctx.fillRect(0, 0, size, size);
 
-      // 经纬线
       ctx.strokeStyle = 'rgba(100, 92, 76, 0.10)';
       ctx.lineWidth = 1;
       for (let i = 0; i < size; i += 4) {
@@ -401,7 +418,6 @@
         ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(size, i); ctx.stroke();
       }
 
-      // 噪点
       const imgData = ctx.getImageData(0, 0, size, size);
       for (let i = 0; i < imgData.data.length; i += 4) {
         const n = (Math.random() - 0.5) * 22;
@@ -436,7 +452,7 @@
             const u = x / segX;
             const v = y / segY;
             const px = (u - 0.5) * w;
-            const py = (0.5 - v) * h; // v=0 在上方
+            const py = (0.5 - v) * h;
             const pz = 0;
             this.particles.push({
               x: px, y: py, z: pz,
@@ -455,7 +471,6 @@
           }
         }
 
-        // 固定最上面一整排，像窗帘/画布挂在杆子上
         for (let x = 0; x <= segX; x++) {
           this.particles[idx(x, 0)].pinned = true;
         }
@@ -468,7 +483,6 @@
     const geometry = new THREE.PlaneGeometry(CLOTH_WIDTH, CLOTH_HEIGHT, SEG_X, SEG_Y);
     geometry.attributes.position.usage = THREE.DynamicDrawUsage;
 
-    // 初始时将几何体顶点与布料粒子对齐
     const posAttr = geometry.attributes.position;
     for (let i = 0; i < cloth.particles.length; i++) {
       const p = cloth.particles[i];
@@ -477,9 +491,9 @@
     geometry.computeVertexNormals();
 
     const material = new THREE.MeshStandardMaterial({
-      map: null,               // 稍后替换为 HTML 纹理
+      color: 0xffffff,
       bumpMap: fabricTex,
-      bumpScale: 0.035,
+      bumpScale: 0.04,
       roughness: 0.92,
       metalness: 0.02,
       side: THREE.DoubleSide,
@@ -501,108 +515,72 @@
     rod.castShadow = true;
     clothMesh.add(rod);
 
-    // ---------- 可交互 DOM 覆盖层（仅“无影响”模式显示） ----------
-    const overlay = document.createElement('div');
-    overlay.id = 'ui-overlay';
-    overlay.innerHTML = document.getElementById('ui-source').innerHTML;
+    // ---------- HTML-in-Canvas：把真实 DOM 渲染为可交互纹理 ----------
+    installHtmlInCanvasPolyfill();
 
-    const cssObj = new CSS3DObject(overlay);
-    cssObj.position.set(0, 0, 0.02);
-    cssObj.scale.set(CLOTH_WIDTH / 840, CLOTH_HEIGHT / 560, 1);
-    clothMesh.add(cssObj);
+    const htmlCanvas = document.getElementById('htmlCanvas');
+    const content = document.getElementById('ui-content');
 
-    // 给覆盖层里的表单加交互
-    const overlayInput = overlay.querySelector('.ui-card input');
-    const overlayBtn = overlay.querySelector('.ui-card button');
-    overlayBtn.addEventListener('click', () => {
-      overlayBtn.textContent = overlayInput.value ? `Sent: ${overlayInput.value}` : 'Please type first';
-    });
-
-    function setOverlayVisible(visible) {
-      overlay.classList.toggle('visible', visible);
-    }
-
-    // ---------- 鼠标交互 ----------
-    const raycaster = new THREE.Raycaster();
-    const pointer = new THREE.Vector2();
-    const mouseLocal = new THREE.Vector3();
-    const prevMouseLocal = new THREE.Vector3();
-    const dragLocal = new THREE.Vector3();
-    let hasMouse = false;
-    let mouseMode = 0; // 0: 推动, 1: 无影响, 2: 拖拽
-    let isDragging = false;
-
-    const modeLabels = ['🖱️ 鼠标：推动画布', '🖱️ 鼠标：无影响', '🖱️ 鼠标：拖动画布'];
-    const modeBtn = document.getElementById('mouseMode');
-    modeBtn.addEventListener('click', () => {
-      mouseMode = (mouseMode + 1) % 3;
-      modeBtn.textContent = modeLabels[mouseMode];
-      isDragging = false;
-      setOverlayVisible(mouseMode === 1);
-    });
-
-    function raycastCloth(clientX, clientY) {
-      pointer.x = (clientX / window.innerWidth) * 2 - 1;
-      pointer.y = -(clientY / window.innerHeight) * 2 + 1;
-      raycaster.setFromCamera(pointer, camera);
-      return raycaster.intersectObject(clothMesh);
-    }
-
-    window.addEventListener('pointermove', (e) => {
-      const hits = raycastCloth(e.clientX, e.clientY);
-      if (hits.length > 0) {
-        const newLocal = hits[0].point.clone();
-        clothMesh.worldToLocal(newLocal);
-        if (!hasMouse) prevMouseLocal.copy(newLocal);
-        mouseLocal.copy(newLocal);
-        hasMouse = true;
-      } else {
-        hasMouse = false;
-      }
-
-      if (isDragging && mouseMode === 2 && hits.length > 0) {
-        dragLocal.copy(mouseLocal);
-      }
-    });
-
-    window.addEventListener('pointerdown', (e) => {
-      if (mouseMode !== 2) return;
-      const hits = raycastCloth(e.clientX, e.clientY);
-      if (hits.length > 0) {
-        dragLocal.copy(hits[0].point);
-        clothMesh.worldToLocal(dragLocal);
-        isDragging = true;
-      }
-    });
-
-    window.addEventListener('pointerup', () => {
-      isDragging = false;
-    });
-
-    // ---------- 捕获 HTML 为纹理 ----------
-    async function captureHtmlTexture() {
-      const source = document.getElementById('ui-source');
-      const canvas = await html2canvas(source, {
-        scale: 1,
-        useCORS: true,
-        backgroundColor: null,
-        logging: false,
-      });
-      const tex = new THREE.CanvasTexture(canvas);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.flipY = true;
-      tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-      return tex;
-    }
-
-    captureHtmlTexture().then((htmlTex) => {
-      material.map = htmlTex;
-      material.needsUpdate = true;
-    });
+    const threeHtml = new ThreeHTMLRenderer();
+    threeHtml.connect(htmlCanvas, camera, renderer);
+    threeHtml.addObject(content, clothMesh);
 
     // 固定摄像头
     camera.position.set(0, -0.2, 8.5);
     camera.lookAt(0, -0.8, 0);
+
+    // ---------- 鼠标交互 ----------
+    let mouseMode = 'none'; // 'none' | 'push' | 'drag'
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    const mouseTarget = new THREE.Vector3();
+    let mouseDown = false;
+
+    function updatePointer(e) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    }
+
+    function raycastCloth() {
+      raycaster.setFromCamera(pointer, camera);
+      const hits = raycaster.intersectObject(clothMesh);
+      return hits.length ? hits[0].point : null;
+    }
+
+    function setMouseMode(mode) {
+      mouseMode = mode;
+      content.style.pointerEvents = mode === 'none' ? 'auto' : 'none';
+      document.querySelectorAll('#mode-buttons button').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.mode === mode);
+      });
+    }
+
+    document.querySelectorAll('#mode-buttons button').forEach((btn) => {
+      btn.addEventListener('click', () => setMouseMode(btn.dataset.mode));
+    });
+    setMouseMode('none');
+
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+      if (mouseMode === 'none') return;
+      updatePointer(e);
+      const p = raycastCloth();
+      if (p) {
+        mouseDown = true;
+        mouseTarget.copy(p);
+      }
+    });
+
+    renderer.domElement.addEventListener('pointermove', (e) => {
+      if (mouseMode === 'none' || !mouseDown) return;
+      updatePointer(e);
+      const p = raycastCloth();
+      if (p) mouseTarget.copy(p);
+    });
+
+    window.addEventListener('pointerup', () => {
+      mouseDown = false;
+    });
 
     // ---------- 风控制 ----------
     const windInput = document.getElementById('wind');
@@ -614,39 +592,23 @@
       gust = 1.6;
     });
 
+    // 给表单按钮加点反馈
+    content.querySelector('.ui-card button').addEventListener('click', () => {
+      const input = content.querySelector('.ui-card input');
+      content.querySelector('.ui-card button').textContent = input.value ? `Sent: ${input.value}` : 'Please type first';
+    });
+
     // ---------- 动画 / 物理更新 ----------
     const clock = new THREE.Clock();
     const gravity = new THREE.Vector3(0, -2.8, 0);
 
     function updateCloth(dt, time) {
-      const totalWind = mouseMode === 1 ? 0 : (windStrength + gust);
-      if (mouseMode === 1) gust = 0;
-
-      // 鼠标移动带来的局部推力
-      let mouseDx = 0, mouseDy = 0, mouseDz = 0;
-      if (hasMouse) {
-        mouseDx = mouseLocal.x - prevMouseLocal.x;
-        mouseDy = mouseLocal.y - prevMouseLocal.y;
-        mouseDz = mouseLocal.z - prevMouseLocal.z;
-      }
+      const totalWind = windStrength + gust;
+      gust = THREE.MathUtils.lerp(gust, 0, dt * 1.2);
 
       for (const p of cloth.particles) {
         if (p.pinned) continue;
 
-        // 无影响模式：把画布摊平，让上面的真实 DOM 可交互
-        if (mouseMode === 1) {
-          const targetX = (p.ix / SEG_X - 0.5) * CLOTH_WIDTH;
-          const targetY = (0.5 - p.iy / SEG_Y) * CLOTH_HEIGHT;
-          p.x = THREE.MathUtils.lerp(p.x, targetX, dt * 3);
-          p.y = THREE.MathUtils.lerp(p.y, targetY, dt * 3);
-          p.z = THREE.MathUtils.lerp(p.z, 0, dt * 4);
-          p.ox = p.x;
-          p.oy = p.y;
-          p.oz = p.z;
-          continue;
-        }
-
-        // 风场：随位置和时间变化，制造不规则起伏
         const wind = new THREE.Vector3(
           Math.sin(time * 1.6 + p.y * 2.4) * 0.4 + Math.cos(time * 0.7 + p.x * 3.0) * 0.2,
           Math.sin(time * 1.1 + p.x * 1.8) * 0.15,
@@ -654,6 +616,20 @@
         ).multiplyScalar(totalWind * (0.85 + Math.random() * 0.3));
 
         const force = new THREE.Vector3().addVectors(gravity, wind);
+
+        if (mouseDown && mouseMode !== 'none') {
+          const dx = mouseTarget.x - p.x;
+          const dy = mouseTarget.y - p.y;
+          const dz = mouseTarget.z - p.z;
+          const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+          const radius = 1.1;
+          if (dist < radius && dist > 0.001) {
+            const pull = (mouseMode === 'drag' ? 5.0 : 2.5) * (1 - dist / radius);
+            force.x += dx * pull;
+            force.y += dy * pull;
+            force.z += dz * pull;
+          }
+        }
 
         const damping = 0.985;
         const vx = (p.x - p.ox) * damping;
@@ -667,41 +643,8 @@
         p.x += vx + force.x * dt * dt;
         p.y += vy + force.y * dt * dt;
         p.z += vz + force.z * dt * dt;
-
-        // 鼠标模式 0：划过/移动时把附近粒子朝移动方向顶出去
-        if (mouseMode === 0 && hasMouse) {
-          const dx = p.x - mouseLocal.x;
-          const dy = p.y - mouseLocal.y;
-          const dz = p.z - mouseLocal.z;
-          const dist2 = dx * dx + dy * dy + dz * dz;
-          const radius = 0.85;
-          if (dist2 < radius * radius) {
-            const falloff = 1 - dist2 / (radius * radius);
-            const pushZ = Math.max(0.02, Math.abs(mouseDx) + Math.abs(mouseDy)) * 8;
-            p.x += (mouseDx * 10 + dx * 0.15) * falloff * dt;
-            p.y += (mouseDy * 10 + dy * 0.15) * falloff * dt;
-            p.z += (mouseDz * 10 + pushZ) * falloff * dt;
-          }
-        }
-
-        // 鼠标模式 2：按住拖拽时，把附近粒子用弹簧力拉向拖拽点
-        if (mouseMode === 2 && isDragging) {
-          const dx = p.x - dragLocal.x;
-          const dy = p.y - dragLocal.y;
-          const dz = p.z - dragLocal.z;
-          const dist2 = dx * dx + dy * dy + dz * dz;
-          const radius = 1.0;
-          if (dist2 < radius * radius) {
-            const falloff = 1 - dist2 / (radius * radius);
-            const strength = 7;
-            p.x -= dx * strength * falloff * dt;
-            p.y -= dy * strength * falloff * dt;
-            p.z -= dz * strength * falloff * dt;
-          }
-        }
       }
 
-      // 约束求解
       for (let k = 0; k < ITERATIONS; k++) {
         for (const c of cloth.constraints) {
           const p1 = cloth.particles[c[0]];
@@ -732,15 +675,12 @@
         }
       }
 
-      // 同步到几何体
       for (let i = 0; i < cloth.particles.length; i++) {
         const p = cloth.particles[i];
         posAttr.setXYZ(i, p.x, p.y, p.z);
       }
       posAttr.needsUpdate = true;
       geometry.computeVertexNormals();
-
-      prevMouseLocal.copy(mouseLocal);
     }
 
     function animate() {
@@ -749,8 +689,8 @@
       const time = clock.getElapsedTime();
 
       updateCloth(dt, time);
+      threeHtml.update();
       renderer.render(scene, camera);
-      cssRenderer.render(scene, camera);
     }
     animate();
 
@@ -759,7 +699,6 @@
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
-      cssRenderer.setSize(window.innerWidth, window.innerHeight);
     });
   </script>
 </body>
