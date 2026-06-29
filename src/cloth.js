@@ -5,6 +5,7 @@
  * - Cloth 类：使用质点-弹簧模型（Verlet 积分）描述布料。
  * - 布料网格：把质点位置同步到 PlaneGeometry 的顶点，实现随风摆动。
  * - 挂杆：布料顶部固定在一根圆柱形挂杆上。
+ * - 重建支持：通过 clothContext 与 rebuildCloth()，支持运行时修改 SEG_X / SEG_Y。
  *
  * 物理核心：
  * 1. 每个网格交点是一个质点（particle），保存当前位置 (x,y,z) 和上一帧位置 (ox,oy,oz)。
@@ -14,7 +15,7 @@
  */
 
 import * as THREE from 'three';
-import { CLOTH_WIDTH, CLOTH_HEIGHT, SEG_X, SEG_Y, ITERATIONS } from './config.js';
+import { CLOTH_WIDTH, CLOTH_HEIGHT, SEG_X, SEG_Y, ITERATIONS, BASE_SEG_X, BASE_SEG_Y } from './config.js';
 import { state } from './state.js';
 import { scene } from './scene.js';
 import { fabricTex } from './fabricTexture.js';
@@ -73,64 +74,112 @@ class Cloth {
   }
 }
 
-/** 全局唯一的布料实例 */
-export const cloth = new Cloth(CLOTH_WIDTH, CLOTH_HEIGHT, SEG_X, SEG_Y);
-
-// ---------- 布料网格 ----------
 /**
- * 创建布料几何体。
- * 使用 PlaneGeometry 并通过 DynamicDrawUsage 标记顶点数据会频繁更新。
+ * 创建布料网格和挂杆。
+ *
+ * @param {number} segX - 横向分段数
+ * @param {number} segY - 纵向分段数
+ * @returns {object} 包含 cloth、geometry、material、clothMesh、rod 的对象
  */
-export const geometry = new THREE.PlaneGeometry(CLOTH_WIDTH, CLOTH_HEIGHT, SEG_X, SEG_Y);
-geometry.attributes.position.usage = THREE.DynamicDrawUsage;
+function createClothMesh(segX, segY) {
+  const cloth = new Cloth(CLOTH_WIDTH, CLOTH_HEIGHT, segX, segY);
 
-const posAttr = geometry.attributes.position;
+  const geometry = new THREE.PlaneGeometry(CLOTH_WIDTH, CLOTH_HEIGHT, segX, segY);
+  geometry.attributes.position.usage = THREE.DynamicDrawUsage;
 
-// 初始化几何体顶点位置为布料质点的初始位置
-for (let i = 0; i < cloth.particles.length; i++) {
-  const p = cloth.particles[i];
-  posAttr.setXYZ(i, p.x, p.y, p.z);
+  const posAttr = geometry.attributes.position;
+  for (let i = 0; i < cloth.particles.length; i++) {
+    const p = cloth.particles[i];
+    posAttr.setXYZ(i, p.x, p.y, p.z);
+  }
+  geometry.computeVertexNormals();
+
+  /**
+   * 布料材质：白色标准材质，使用织物纹理作为 bumpMap，
+   * 配合 roughness 与 metalness 模拟布料的漫反射表面。
+   */
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    bumpMap: fabricTex,
+    bumpScale: 0.04,
+    roughness: 0.92,
+    metalness: 0.02,
+    side: THREE.DoubleSide, // 双面渲染，因为布料会被风吹翻面
+  });
+
+  const clothMesh = new THREE.Mesh(geometry, material);
+  clothMesh.castShadow = true;
+  clothMesh.receiveShadow = true;
+  clothMesh.position.y = 0.0;
+  clothMesh.rotation.x = -0.06; // 微微倾斜，看起来更自然
+
+  // 顶部挂杆
+  const rodGeo = new THREE.CylinderGeometry(0.06, 0.06, CLOTH_WIDTH + 0.5, 16);
+  const rodMat = new THREE.MeshStandardMaterial({ color: 0x8a8a8a, roughness: 0.3, metalness: 0.8 });
+  const rod = new THREE.Mesh(rodGeo, rodMat);
+  rod.rotation.z = Math.PI / 2;
+  rod.position.set(0, CLOTH_HEIGHT / 2, 0);
+  rod.castShadow = true;
+  clothMesh.add(rod);
+
+  return { cloth, geometry, material, clothMesh, rod };
 }
-geometry.computeVertexNormals();
 
 /**
- * 布料材质：白色标准材质，使用织物纹理作为 bumpMap，
- * 配合 roughness 与 metalness 模拟布料的漫反射表面。
+ * clothContext：保存当前布料相关的所有对象引用。
+ *
+ * 使用一个对象包装，而不是直接导出 clothMesh 常量，
+ * 是为了在重建布料后，其他模块能立即拿到新的 mesh 引用。
  */
-const material = new THREE.MeshStandardMaterial({
-  color: 0xffffff,
-  bumpMap: fabricTex,
-  bumpScale: 0.04,
-  roughness: 0.92,
-  metalness: 0.02,
-  side: THREE.DoubleSide, // 双面渲染，因为布料会被风吹翻面
-});
+export const clothContext = createClothMesh(SEG_X, SEG_Y);
+scene.add(clothContext.clothMesh);
 
-/** 布料网格对象，会被加入场景 */
-export const clothMesh = new THREE.Mesh(geometry, material);
-clothMesh.castShadow = true;
-clothMesh.receiveShadow = true;
-clothMesh.position.y = 0.0;
-clothMesh.rotation.x = -0.06; // 微微倾斜，看起来更自然
-scene.add(clothMesh);
-
-// ---------- 顶部挂杆 ----------
 /**
- * 在布料顶部放置一根金属圆柱挂杆，让布料有“挂起来”的视觉锚点。
+ * 根据当前 config.js 中的 SEG_X / SEG_Y 重新生成布料。
+ *
+ * 重建流程：
+ * 1. 从场景移除旧布料网格。
+ * 2. 释放旧 geometry 和 material 的 GPU 资源。
+ * 3. 调用 createClothMesh 创建新的物理模型和 Three.js 网格。
+ * 4. 更新 clothContext 中的引用。
+ * 5. 通知 htmlRenderer 重新绑定 HTML overlay 到新的 mesh。
+ *
+ * @param {Function} [onRebuild] - 重建完成后的回调，通常用于重新绑定 HTML overlay
  */
-const rodGeo = new THREE.CylinderGeometry(0.06, 0.06, CLOTH_WIDTH + 0.5, 16);
-const rodMat = new THREE.MeshStandardMaterial({ color: 0x8a8a8a, roughness: 0.3, metalness: 0.8 });
-const rod = new THREE.Mesh(rodGeo, rodMat);
-rod.rotation.z = Math.PI / 2; // 圆柱默认竖直，旋转为水平
-rod.position.set(0, CLOTH_HEIGHT / 2, 0);
-rod.castShadow = true;
-clothMesh.add(rod); // 挂杆作为 clothMesh 的子对象，跟随布料整体移动
+export function rebuildCloth(onRebuild) {
+  // 清理旧资源
+  scene.remove(clothContext.clothMesh);
+  clothContext.geometry.dispose();
+  clothContext.material.dispose();
+
+  // 创建新布料
+  const newCloth = createClothMesh(SEG_X, SEG_Y);
+
+  // 更新上下文引用
+  clothContext.cloth = newCloth.cloth;
+  clothContext.geometry = newCloth.geometry;
+  clothContext.material = newCloth.material;
+  clothContext.clothMesh = newCloth.clothMesh;
+  clothContext.rod = newCloth.rod;
+
+  scene.add(clothContext.clothMesh);
+
+  // 通知外部重新绑定 HTML-in-Canvas
+  if (onRebuild) onRebuild(clothContext.clothMesh);
+}
 
 // ---------- 物理更新 ----------
 /**
- * 重力向量，始终沿 Y 轴负方向。
+ * 计算当前分段数下的重力向量。
+ *
+ * 说明：SEG_X / SEG_Y 增加后，质点数量变多、每个约束长度变短。
+ * 如果保持每个质点的重力不变，垂坠形态会随分段数改变，导致布料“视觉大小”变化。
+ * 因此按纵向分段比例缩放每个质点的重力，使不同细腻度下的整体垂坠程度保持一致。
  */
-const gravity = new THREE.Vector3(0, -2.8, 0);
+function getGravity() {
+  const scale = BASE_SEG_Y / SEG_Y;
+  return new THREE.Vector3(0, -2.8 * scale, 0);
+}
 
 /**
  * 更新布料物理状态，并把新位置同步到 Three.js 几何体。
@@ -139,6 +188,9 @@ const gravity = new THREE.Vector3(0, -2.8, 0);
  * @param {number} time - 从场景启动开始的累计时间（秒），用于风力随时间变化
  */
 export function updateCloth(dt, time) {
+  const { cloth, geometry } = clothContext;
+  const posAttr = geometry.attributes.position;
+
   // 总风力 = 基础风力 + 阵风，阵风会按指数衰减
   const totalWind = state.windStrength + state.gust;
   state.gust = THREE.MathUtils.lerp(state.gust, 0, dt * 1.2);
@@ -152,14 +204,21 @@ export function updateCloth(dt, time) {
      * 使用多层正弦/余弦函数叠加，让风在时间和空间上都不规则，
      * 再乘以 totalWind 和一个随机抖动，模拟阵风效果。
      */
+    /**
+     * 计算当前质点受到的风力。
+     * 使用多层正弦/余弦函数叠加，让风在时间和空间上都不规则。
+     * 乘以 areaScale 是为了在增加分段数时保持单位面积上的风力大致相同，
+     * 避免高细腻度下布料被“吹得变形过大”。
+     */
+    const areaScale = (BASE_SEG_X * BASE_SEG_Y) / (SEG_X * SEG_Y);
     const wind = new THREE.Vector3(
       Math.sin(time * 1.6 + p.y * 2.4) * 0.4 + Math.cos(time * 0.7 + p.x * 3.0) * 0.2,
       Math.sin(time * 1.1 + p.x * 1.8) * 0.15,
       Math.sin(time * 2.2 + p.x * 4.0 + p.y * 2.5) * 0.5 + 0.55
-    ).multiplyScalar(totalWind * (0.85 + Math.random() * 0.3));
+    ).multiplyScalar(totalWind * (0.85 + Math.random() * 0.3) * areaScale);
 
     // 合力 = 重力 + 风力
-    const force = new THREE.Vector3().addVectors(gravity, wind);
+    const force = new THREE.Vector3().addVectors(getGravity(), wind);
 
     // 鼠标交互：在 push/drag 模式下，鼠标附近的质点会被吸引向鼠标命中点
     if (state.mouseDown && state.mouseMode !== 'none') {

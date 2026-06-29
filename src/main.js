@@ -15,6 +15,7 @@ import './scene.js';
 import './cloth.js';
 import './htmlRenderer.js';
 import './input.js';
+import './sceneControls.js';
 import { animate } from './animation.js';
 
 // 启动动画循环

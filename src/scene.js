@@ -49,14 +49,14 @@ if (webglContainer) {
 /**
  * 环境光：均匀照亮整个场景，避免纯黑区域。
  */
-const ambient = new THREE.AmbientLight(0xffffff, 0.35);
+export const ambient = new THREE.AmbientLight(0xffffff, 0.35);
 scene.add(ambient);
 
 /**
  * 平行光：模拟主光源（如太阳），产生清晰的阴影。
  * 通过配置 shadow.camera 的视锥体，让阴影覆盖布料所在的区域。
  */
-const dirLight = new THREE.DirectionalLight(0xfff4e6, 2.2);
+export const dirLight = new THREE.DirectionalLight(0xfff4e6, 2.2);
 dirLight.position.set(4, 6, 6);
 dirLight.castShadow = true;
 dirLight.shadow.mapSize.set(2048, 2048); // 阴影贴图分辨率
@@ -72,7 +72,7 @@ scene.add(dirLight);
 /**
  * 轮廓光（聚光灯）：从侧后方打亮布料边缘，增加层次感和体积感。
  */
-const rimLight = new THREE.SpotLight(0x6366f1, 3.0);
+export const rimLight = new THREE.SpotLight(0x6366f1, 3.0);
 rimLight.position.set(-6, 2, -3);
 rimLight.lookAt(0, 0, 0);
 scene.add(rimLight);
@@ -82,7 +82,11 @@ scene.add(rimLight);
  * 创建地面平面，用于接收布料阴影，让布料看起来是悬空的。
  */
 const floorGeo = new THREE.PlaneGeometry(40, 40);
-const floorMat = new THREE.MeshStandardMaterial({
+
+/**
+ * 地面材质，导出供场景控制面板调整粗糙度和金属度。
+ */
+export const floorMat = new THREE.MeshStandardMaterial({
   color: 0x111116,
   roughness: 0.85,
   metalness: 0.1,

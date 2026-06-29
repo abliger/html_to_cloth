@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import { state } from './state.js';
 import { renderer, camera } from './scene.js';
-import { clothMesh } from './cloth.js';
+import { clothContext } from './cloth.js';
 import { content } from './htmlRenderer.js';
 
 // ---------- 鼠标交互 ----------
@@ -43,7 +43,7 @@ function updatePointer(e) {
  */
 function raycastCloth() {
   raycaster.setFromCamera(pointer, camera);
-  const hits = raycaster.intersectObject(clothMesh);
+  const hits = raycaster.intersectObject(clothContext.clothMesh);
   return hits.length ? hits[0].point : null;
 }
 
@@ -58,6 +58,8 @@ function raycastCloth() {
  */
 export function setMouseMode(mode) {
   state.mouseMode = mode;
+  // 无影响模式：content 接收事件，HTML 可交互
+  // 推动/拖动模式：content 不接收事件，让事件落到 WebGL canvas
   if (content) {
     content.style.pointerEvents = mode === 'none' ? 'auto' : 'none';
   }

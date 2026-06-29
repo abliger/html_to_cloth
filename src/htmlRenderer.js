@@ -14,7 +14,7 @@
 import { installHtmlInCanvasPolyfill } from 'three-html-render/polyfill';
 import { ThreeHTMLRenderer } from 'three-html-render/renderer';
 import { renderer, camera } from './scene.js';
-import { clothMesh } from './cloth.js';
+import { clothContext } from './cloth.js';
 
 // 安装 polyfill，使浏览器支持 layoutsubtree 等 HTML-in-Canvas 相关 API
 installHtmlInCanvasPolyfill();
@@ -34,15 +34,47 @@ export const content = document.getElementById('ui-content');
 if (content) {
   renderer.domElement.setAttribute('layoutsubtree', '');
   renderer.domElement.appendChild(content);
-  threeHtml.addObject(content, clothMesh);
 }
 
 /**
- * polyfill 会把 content 放进一个 host overlay 容器里。
- * 这里让 host 不接收 pointer-events，只让被 transform 定位的 content 接收事件，
- * 避免 host 挡住页面右上角的控制面板和左上角的 info 提示。
+ * 将 HTML 内容绑定到指定的布料网格。
+ *
+ * @param {THREE.Mesh} mesh - 要绑定的布料网格
+ * @returns {object} ThreeHTMLRenderer 内部返回的绑定对象，可用于后续 remove
  */
+function addClothObject(mesh) {
+  if (!content) return null;
+  return threeHtml.addObject(content, mesh);
+}
+
+/** 当前 HTML overlay 与布料网格的绑定对象 */
+let clothObject = content ? addClothObject(clothContext.clothMesh) : null;
+
+// polyfill 会把 content 移到一个 host overlay 容器里
 const htmlHost = content ? content.parentElement : null;
+// host 本身不需要接收事件，只让被 matrix3d 定位的 content 接收，避免挡住 controls
 if (htmlHost) {
   htmlHost.style.pointerEvents = 'none';
+}
+
+/**
+ * 重新绑定 HTML overlay 到新的布料网格。
+ *
+ * 当用户通过控制面板修改 SEG_X / SEG_Y 后，会重建布料网格，
+ * 此时需要移除旧的 addObject 绑定，并把 content 绑定到新的 mesh 上。
+ *
+ * @param {THREE.Mesh} newMesh - 新的布料网格
+ */
+export function reconnectClothMesh(newMesh) {
+  if (!content) return;
+  if (clothObject) {
+    threeHtml.remove(clothObject);
+  }
+  clothObject = addClothObject(newMesh);
+
+  // 重新确保 host 不拦截事件
+  const host = content.parentElement;
+  if (host) {
+    host.style.pointerEvents = 'none';
+  }
 }
