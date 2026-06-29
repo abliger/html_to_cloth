@@ -9,6 +9,9 @@
  * 2. ThreeHTMLRenderer 负责在每一帧把 DOM 内容同步为 WebGL 纹理/overlay，
  *    并通过射线检测把鼠标事件转发回 DOM，所以按钮、输入框、滚动仍然可交互。
  * 3. 把 #ui-content 移动到 renderer.domElement 内部，让 overlay 与 canvas 坐标对齐。
+ *
+ * 重要顺序：必须先给 canvas 设置 layoutsubtree 属性，再调用 threeHtml.connect()，
+ * 否则 polyfill 会提示 onpaint 不会触发，content 的 opacity 也会被设为 0，导致看不到 HTML。
  */
 
 import { installHtmlInCanvasPolyfill } from 'three-html-render/polyfill';
@@ -20,21 +23,24 @@ import { clothContext } from './cloth.js';
 installHtmlInCanvasPolyfill();
 
 /**
- * ThreeHTMLRenderer 实例，负责连接 Three.js 渲染器与 HTML 内容。
- */
-export const threeHtml = new ThreeHTMLRenderer();
-threeHtml.connect(renderer.domElement, camera, renderer);
-
-/**
  * 页面中真实的 HTML UI 内容容器。
  * 把它移动到 WebGL canvas 内部后，polyfill 会基于 clothMesh 的变形矩阵
  * 把 content 以 CSS 3D transform 的方式贴合在布料表面。
  */
 export const content = document.getElementById('ui-content');
+
 if (content) {
+  // 先设置 layoutsubtree 属性，再移动 content，最后 connect threeHtml。
+  // 这个顺序是 three-html-render polyfill 正常工作所要求的。
   renderer.domElement.setAttribute('layoutsubtree', '');
   renderer.domElement.appendChild(content);
 }
+
+/**
+ * ThreeHTMLRenderer 实例，负责连接 Three.js 渲染器与 HTML 内容。
+ */
+export const threeHtml = new ThreeHTMLRenderer();
+threeHtml.connect(renderer.domElement, camera, renderer);
 
 /**
  * 将 HTML 内容绑定到指定的布料网格。
