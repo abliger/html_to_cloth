@@ -15,7 +15,6 @@
 import { scene, camera, ambient, dirLight, rimLight, floorMat } from './scene.js';
 import { SEG_X, SEG_Y, resolutionScale, BASE_SEG_X, setSegments, setResolutionScale, getScaledSegments } from './config.js';
 import { rebuildCloth } from './cloth.js';
-import { reconnectClothMesh } from './htmlRenderer.js';
 
 /**
  * 将 Three.js Color 对象转换为 #rrggbb 格式的字符串，供 color input 使用。
@@ -251,8 +250,9 @@ function initSceneControls() {
       return;
     }
     setSegments(x, y);
-    // 重建布料网格，并重新绑定 HTML overlay
-    rebuildCloth((newMesh) => reconnectClothMesh(newMesh));
+    // 重建布料网格：cloth.js 会派发 cloth:rebuilt 事件，
+    // htmlRenderer.js 监听到后自动重新绑定 HTML overlay
+    rebuildCloth();
   });
   clothGroup.appendChild(rebuildBtn);
 
@@ -267,7 +267,7 @@ function initSceneControls() {
     setSegments(clothDefaults.segX, clothDefaults.segY);
     resolutionInput.value = 1.0;
     resolutionInput.previousElementSibling.textContent = '细腻度 x1.0';
-    rebuildCloth((newMesh) => reconnectClothMesh(newMesh));
+    rebuildCloth();
   });
   clothGroup.appendChild(resetClothBtn);
 

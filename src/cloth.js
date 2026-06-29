@@ -142,29 +142,52 @@ scene.add(clothContext.clothMesh);
  * 2. 释放旧 geometry 和 material 的 GPU 资源。
  * 3. 调用 createClothMesh 创建新的物理模型和 Three.js 网格。
  * 4. 更新 clothContext 中的引用。
- * 5. 通知 htmlRenderer 重新绑定 HTML overlay 到新的 mesh。
+ * 5. 通过 CustomEvent 通知 htmlRenderer 自动重新绑定 HTML overlay。
  *
- * @param {Function} [onRebuild] - 重建完成后的回调，通常用于重新绑定 HTML overlay
+ * @param {Function} [onRebuild] - （可选）重建完成后的回调，接收新的 clothMesh
+ */
+/**
+ * 重建布料物理模型和几何体，同时保留原来的 material。
+ *
+ * 为什么保留 material：
+ * threeHtml.addObject() 会把 content 的纹理设置到 mesh.material.map 上。
+ * 如果重建时替换 material，这个 map 会丢失，导致布料上看不到 HTML。
+ * 因此只替换 geometry，保留旧 material，让 HTML 纹理继续生效。
+ *
+ * @param {Function} [onRebuild] - （可选）重建完成后的回调
  */
 export function rebuildCloth(onRebuild) {
-  // 清理旧资源
-  scene.remove(clothContext.clothMesh);
-  clothContext.geometry.dispose();
-  clothContext.material.dispose();
+  // 保存旧资源
+  const oldGeometry = clothContext.geometry;
+  const oldMaterial = clothContext.material;
 
-  // 创建新布料
-  const newCloth = createClothMesh(SEG_X, SEG_Y);
+  // 创建新的物理模型和 geometry（忽略它返回的 material）
+  const newClothData = createClothMesh(SEG_X, SEG_Y);
 
-  // 更新上下文引用
-  clothContext.cloth = newCloth.cloth;
-  clothContext.geometry = newCloth.geometry;
-  clothContext.material = newCloth.material;
-  clothContext.clothMesh = newCloth.clothMesh;
-  clothContext.rod = newCloth.rod;
+  // 更新上下文：保留旧 material，只换 geometry/cloth
+  clothContext.cloth = newClothData.cloth;
+  clothContext.geometry = newClothData.geometry;
+  // material 保持不变，确保 HTML 纹理（material.map）不丢失
+  clothContext.material = oldMaterial;
 
-  scene.add(clothContext.clothMesh);
+  // 复用原来的 clothMesh 对象，只替换 geometry，保留原 material
+  clothContext.clothMesh.geometry = newClothData.geometry;
+  // clothMesh.material 保持为 oldMaterial
 
-  // 通知外部重新绑定 HTML-in-Canvas
+  // rod 的尺寸不随 SEG_X/SEG_Y 变化，保留旧的 rod；
+  // createClothMesh 还会创建新的 rod 和 material，这些都没有被使用，需要释放
+  newClothData.rod.geometry.dispose();
+  newClothData.rod.material.dispose();
+  newClothData.material.dispose();
+  oldGeometry.dispose();
+
+  // 立即更新世界矩阵，确保 threeHtml.update() 在下一帧能拿到正确的 matrixWorld
+  clothContext.clothMesh.updateMatrixWorld(true);
+
+  // 派发全局事件，通知 htmlRenderer 等模块重建已完成
+  window.dispatchEvent(new CustomEvent('cloth:rebuilt', { detail: clothContext.clothMesh }));
+
+  // 保留回调机制，方便外部模块做额外处理
   if (onRebuild) onRebuild(clothContext.clothMesh);
 }
 

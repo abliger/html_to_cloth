@@ -125,6 +125,8 @@ body {
   /* 让滚动和选中更自然 */
   -webkit-overflow-scrolling: touch;
   user-select: text;
+  /* 减少 3D 变换下文本选择高亮的抖动 */
+  -webkit-font-smoothing: antialiased;
 }
 
 .ui-header {

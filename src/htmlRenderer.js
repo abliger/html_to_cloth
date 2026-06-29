@@ -18,6 +18,7 @@ import { installHtmlInCanvasPolyfill } from 'three-html-render/polyfill';
 import { ThreeHTMLRenderer } from 'three-html-render/renderer';
 import { renderer, camera } from './scene.js';
 import { clothContext } from './cloth.js';
+import { state } from './state.js';
 
 // 安装 polyfill，使浏览器支持 layoutsubtree 等 HTML-in-Canvas 相关 API
 installHtmlInCanvasPolyfill();
@@ -43,6 +44,16 @@ export const threeHtml = new ThreeHTMLRenderer();
 threeHtml.connect(renderer.domElement, camera, renderer);
 
 /**
+ * 根据当前鼠标模式设置 content 的 pointer-events。
+ * threeHtml.addObject 会把 content 的 pointer-events 重置为 auto，
+ * 重建后需要根据当前模式重新设置，避免 push/drag 模式下 content 又变成可交互。
+ */
+function applyContentPointerEvents() {
+  if (!content) return;
+  content.style.pointerEvents = state.mouseMode === 'none' ? 'auto' : 'none';
+}
+
+/**
  * 将 HTML 内容绑定到指定的布料网格。
  *
  * @param {THREE.Mesh} mesh - 要绑定的布料网格
@@ -50,7 +61,9 @@ threeHtml.connect(renderer.domElement, camera, renderer);
  */
 function addClothObject(mesh) {
   if (!content) return null;
-  return threeHtml.addObject(content, mesh);
+  const obj = threeHtml.addObject(content, mesh);
+  applyContentPointerEvents();
+  return obj;
 }
 
 /** 当前 HTML overlay 与布料网格的绑定对象 */
@@ -63,20 +76,28 @@ if (htmlHost) {
   htmlHost.style.pointerEvents = 'none';
 }
 
+// 监听布料重建事件，自动把 HTML overlay 重新绑定到新的 clothMesh
+window.addEventListener('cloth:rebuilt', (e) => {
+  reconnectClothMesh(e.detail);
+});
+
 /**
  * 重新绑定 HTML overlay 到新的布料网格。
  *
  * 当用户通过控制面板修改 SEG_X / SEG_Y 后，会重建布料网格，
- * 此时需要移除旧的 addObject 绑定，并把 content 绑定到新的 mesh 上。
+ * 此时直接更新已有绑定对象的 mesh 引用即可，
+ * 避免重复调用 addObject/removeObject 导致 polyfill 内部状态混乱、opacity 被置 0。
  *
  * @param {THREE.Mesh} newMesh - 新的布料网格
  */
 export function reconnectClothMesh(newMesh) {
   if (!content) return;
   if (clothObject) {
-    threeHtml.remove(clothObject);
+    // 直接替换 mesh 引用，不触发 polyfill 的 add/remove 流程
+    clothObject.mesh = newMesh;
+  } else {
+    clothObject = addClothObject(newMesh);
   }
-  clothObject = addClothObject(newMesh);
 
   // 重新确保 host 不拦截事件
   const host = content.parentElement;
