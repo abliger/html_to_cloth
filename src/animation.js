@@ -13,24 +13,27 @@ import { threeHtml } from './htmlRenderer.js';
 import { updateCloth } from './cloth.js';
 
 /**
- * Three.js 时钟对象，用于获取帧间时间差和累计时间。
+ * Three.js 计时器对象，用于获取帧间时间差和累计时间。
  */
-const clock = new THREE.Clock();
+const timer = new THREE.Timer();
+timer.connect(document);
 
 /**
  * 动画循环函数，每帧自动调用自身。
  *
  * 流程：
  * 1. requestAnimationFrame 预约下一帧。
- * 2. dt 限制最大 0.05 秒，避免切换标签页回来后物理爆炸。
- * 3. updateCloth(dt, time) 更新布料质点位置。
- * 4. threeHtml.update() 同步 HTML overlay 与布料变形。
- * 5. renderer.render(scene, camera) 绘制一帧画面。
+ * 2. timer.update() 更新内部时间状态。
+ * 3. dt 限制最大 0.05 秒，避免切换标签页回来后物理爆炸。
+ * 4. updateCloth(dt, time) 更新布料质点位置。
+ * 5. threeHtml.update() 同步 HTML overlay 与布料变形。
+ * 6. renderer.render(scene, camera) 绘制一帧画面。
  */
-export function animate() {
+export function animate(timeMs) {
   requestAnimationFrame(animate);
-  const dt = Math.min(clock.getDelta(), 0.05);
-  const time = clock.getElapsedTime();
+  timer.update(timeMs);
+  const dt = Math.min(timer.getDelta(), 0.05);
+  const time = timer.getElapsed();
 
   updateCloth(dt, time);
   threeHtml.update();
