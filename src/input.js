@@ -12,7 +12,7 @@ import * as THREE from 'three';
 import { state } from './state.js';
 import { renderer, camera } from './scene.js';
 import { clothContext } from './cloth.js';
-import { content } from './htmlRenderer.js';
+import { content, applyContentPointerEvents } from './htmlRenderer.js';
 
 // ---------- 鼠标交互 ----------
 /**
@@ -60,9 +60,7 @@ export function setMouseMode(mode) {
   state.mouseMode = mode;
   // 无影响模式：content 接收事件，HTML 可交互
   // 推动/拖动模式：content 不接收事件，让事件落到 WebGL canvas
-  if (content) {
-    content.style.pointerEvents = mode === 'none' ? 'auto' : 'none';
-  }
+  applyContentPointerEvents();
   document.querySelectorAll('#mode-buttons button').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.mode === mode);
   });

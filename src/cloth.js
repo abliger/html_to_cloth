@@ -130,8 +130,19 @@ function createClothMesh(segX, segY) {
   // 5. 创建布料网格对象
   const clothMesh = new THREE.Mesh(geometry, material);
 
-  // 开启阴影：布料既能投射阴影，也能接收阴影。
-  clothMesh.castShadow = true;
+  // 阴影设置：布料只接收阴影，不投射阴影。
+  //
+  // 为什么 castShadow = false：
+  // 布料的 material.map 是 THREE.HTMLTexture。开启 castShadow 后，three.js 会在阴影
+  // 深度 pass 里为布料生成深度材质，并无条件把 material.map 复制给深度材质
+  // （WebGLShadowMap.getDepthMaterial 中的 result.map = material.map），于是深度着色器
+  // 会采样这张 HTMLTexture。而 HTMLTexture 依赖 polyfill 的 texElementImage2D 上传，
+  // 在阴影 framebuffer 绑定期间采样它会触发 WebGL 错误：
+  //   GL_INVALID_OPERATION: Feedback loop formed between Framebuffer and active Texture
+  // 该错误在真实 GPU 上同样出现，且每帧刷屏。布料本身完全不透明、无 alphaTest，
+  // 阴影根本不需要采样贴图，因此关闭 castShadow 即可彻底消除反馈环。
+  // 挂杆(rod)仍 castShadow，地面仍 receiveShadow，布料仍 receiveShadow，观感基本不变。
+  clothMesh.castShadow = false;
   clothMesh.receiveShadow = true;
 
   // y = 0 让布料中心位于世界坐标原点附近。
@@ -196,7 +207,7 @@ scene.add(clothContext.clothMesh);
  * 重建布料物理模型和几何体，同时保留原来的 material。
  *
  * 为什么保留 material：
- * threeHtml.addObject() 会把 content 的纹理设置到 mesh.material.map 上。
+ * htmlRenderer.bindClothHTML() 把 HTMLTexture 设置到 mesh.material.map 上。
  * 如果重建时替换 material，这个 map 会丢失，导致布料上看不到 HTML。
  * 因此只替换 geometry，保留旧 material，让 HTML 纹理继续生效。
  *
@@ -227,7 +238,7 @@ export function rebuildCloth(onRebuild) {
   newClothData.material.dispose();
   oldGeometry.dispose();
 
-  // 立即更新世界矩阵，确保 threeHtml.update() 在下一帧能拿到正确的 matrixWorld
+  // 立即更新世界矩阵，确保 RaycastInteractionManager 下一帧射线检测能拿到正确的 matrixWorld
   clothContext.clothMesh.updateMatrixWorld(true);
 
   // 派发全局事件，通知 htmlRenderer 等模块重建已完成
