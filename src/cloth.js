@@ -82,21 +82,41 @@ class Cloth {
  * @returns {object} 包含 cloth、geometry、material、clothMesh、rod 的对象
  */
 function createClothMesh(segX, segY) {
+  // 1. 创建物理模型
+  // Cloth 类基于 Verlet 积分建立质点-弹簧系统。
+  // 它会生成 (segX+1) * (segY+1) 个质点，并在相邻质点之间建立距离约束。
   const cloth = new Cloth(CLOTH_WIDTH, CLOTH_HEIGHT, segX, segY);
 
+  // 2. 创建 Three.js 几何体
+  // PlaneGeometry(w, h, segX, segY) 生成一个平面网格，顶点数量与 cloth.particles 一致。
+  // 注意：PlaneGeometry 默认躺在 XY 平面，且 y 轴方向与 Cloth 中的 v 方向相反，
+  // 因此 Cloth 在构造时已经将 y 坐标映射为 (0.5 - v) * h，使两者顶点顺序一一对应。
   const geometry = new THREE.PlaneGeometry(CLOTH_WIDTH, CLOTH_HEIGHT, segX, segY);
+
+  // 标记 position 属性为动态更新，提示 Three.js 每帧都会修改顶点位置。
   geometry.attributes.position.usage = THREE.DynamicDrawUsage;
 
+  // 3. 用物理质点的初始位置填充几何体顶点
+  // 这样布料网格的初始形态与物理模型完全一致。
   const posAttr = geometry.attributes.position;
   for (let i = 0; i < cloth.particles.length; i++) {
     const p = cloth.particles[i];
     posAttr.setXYZ(i, p.x, p.y, p.z);
   }
+
+  // 根据初始顶点重新计算法线，让材质的光照和凹凸效果正确。
   geometry.computeVertexNormals();
 
   /**
-   * 布料材质：白色标准材质，使用织物纹理作为 bumpMap，
-   * 配合 roughness 与 metalness 模拟布料的漫反射表面。
+   * 4. 创建布料材质
+   *
+   * 使用 MeshStandardMaterial（基于物理的渲染）：
+   * - color: 0xffffff 白色基底，后续可被 HTML 纹理染色。
+   * - bumpMap: 织物纹理，提供布料表面的细小凹凸细节。
+   * - bumpScale: 0.04，控制凹凸强度，避免太夸张。
+   * - roughness: 0.92，布料几乎不反光，呈现漫反射效果。
+   * - metalness: 0.02，布料没有金属感。
+   * - side: DoubleSide，布料在风中会翻面，必须双面可见。
    */
   const material = new THREE.MeshStandardMaterial({
     color: 0xffffff,
@@ -104,24 +124,50 @@ function createClothMesh(segX, segY) {
     bumpScale: 0.04,
     roughness: 0.92,
     metalness: 0.02,
-    side: THREE.DoubleSide, // 双面渲染，因为布料会被风吹翻面
+    side: THREE.DoubleSide,
   });
 
+  // 5. 创建布料网格对象
   const clothMesh = new THREE.Mesh(geometry, material);
+
+  // 开启阴影：布料既能投射阴影，也能接收阴影。
   clothMesh.castShadow = true;
   clothMesh.receiveShadow = true;
-  clothMesh.position.y = 0.0;
-  clothMesh.rotation.x = -0.06; // 微微倾斜，看起来更自然
 
-  // 顶部挂杆
+  // y = 0 让布料中心位于世界坐标原点附近。
+  clothMesh.position.y = 0.0;
+
+  // 绕 x 轴微微倾斜，使布料看起来不是完全竖直，更像自然悬挂。
+  clothMesh.rotation.x = -0.06;
+
+  // 6. 创建顶部挂杆
+  // 挂杆是一根圆柱体，半径 0.06，长度比布料宽度略长 0.5。
+  // 分段数 16 足够圆滑，同时保持较低面数。
   const rodGeo = new THREE.CylinderGeometry(0.06, 0.06, CLOTH_WIDTH + 0.5, 16);
-  const rodMat = new THREE.MeshStandardMaterial({ color: 0x8a8a8a, roughness: 0.3, metalness: 0.8 });
+
+  // 挂杆材质：银灰色金属，略带光泽。
+  const rodMat = new THREE.MeshStandardMaterial({
+    color: 0x8a8a8a,
+    roughness: 0.3,
+    metalness: 0.8,
+  });
+
   const rod = new THREE.Mesh(rodGeo, rodMat);
+
+  // CylinderGeometry 默认沿 y 轴竖直生长，需要绕 z 轴旋转 90° 使其水平放置。
   rod.rotation.z = Math.PI / 2;
+
+  // 将挂杆定位在布料顶部中心。
+  // Cloth 中 y=0 的质点对应布料最上方，其 y 坐标为 CLOTH_HEIGHT / 2。
   rod.position.set(0, CLOTH_HEIGHT / 2, 0);
+
   rod.castShadow = true;
+
+  // 把挂杆作为 clothMesh 的子对象，这样移动/旋转 clothMesh 时挂杆会一起跟随。
   clothMesh.add(rod);
 
+  // 7. 返回所有相关对象
+  // cloth: 物理模型，geometry: 顶点数据，material: 材质，clothMesh: 渲染网格，rod: 挂杆。
   return { cloth, geometry, material, clothMesh, rod };
 }
 
